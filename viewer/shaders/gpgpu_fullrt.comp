@@ -1,3 +1,5 @@
+
+
 #version 430 core
 
 layout(binding = 2, rgba32f) uniform writeonly image2D framebuffer;
@@ -322,6 +324,113 @@ bool isIntersected(vec4 origin, vec4 dir)
 
 // Local illumination related functions. TODO
 
+/*
+The key function is directIllumination(). It is called by trace() for each pixel of the screen that covers an object of the scene (we'll cover this in the ray-tracing lecture).
+
+First, edit this function so that it computes local illumination using the Blinn-Phong model. Make it as modular as possible, so you can reuse code in future works, but also move code aside when you change lighting model.
+
+You already have the point position, its color and the incoming viewing direction ​V​⃗​​. You will have to compute the shading normal ​n​⃗​​ and the vector to the light source ​L​⃗​​. 
+*/
+
+vec4 lightDirection(vec4 p)
+{
+    // Which to use TODO
+    vec4 normalized_p = normalize(p);
+    return lightPosition - normalized_p.xyz / normalized_p.w;
+    return normalize(vec4(lightPosition, 1) - p);
+}
+
+vec4 blinnPhongAmbient(vec4 color)
+{
+    return color * Ka * lightIntensity;
+}
+
+vec4 blinnPhongDiffuse(vec4 color, vec4 normal, vec4 lightDirection)
+{
+    return Kd * color * max(dot(normal, lightDirection), 0) * lightIntensity;
+}
+
+float fresnel(float cosTheta)
+{
+    float sinThetaSqrd = 1 - pow(cosTheta, 2);
+
+    float ci = sqrt(pow(eta, 2) - sinThetaSqrd);
+
+    float Fs = pow(abs((cosTheta - ci) / (cosTheta + ci)), 2);
+    float Fp = pow(abs((pow(eta, 2) * cosTheta - ci) / (pow(eta, 2) * cosTheta + ci)), 2);  
+    
+    return (Fs + Fp) / 2;
+}
+
+vec4 halfVector(vec4 a, vec4 b)
+{
+    return (a + b) / length(a + b);
+}
+
+vec4 blinnPhongSpecular(vec4 color, vec4 n, vec4 v, vec4 lightDirection)
+{ 
+    vec4 H = halfVector(v, lightDirection);
+
+    float cosTheta = dot(n, v);
+    float frs = fresnel(cosTheta);
+
+    return frs * color * pow(max(dot(n, H), 0), shininess) * lightIntensity;
+}
+
+vec4 blinnPhongColor(vec4 color, vec4 p, vec4 n, vec4 v)
+{
+    vec4 lightDirection = lightDirection(p);
+    
+    vec4 Ca = blinnPhongAmbient(color);
+    vec4 Cd = blinnPhongDiffuse(color, n, lightDirection);
+    vec4 Cs = blinnPhongSpecular(color, n, v, lightDirection);
+
+    return Ca + Cd + Cs;
+}
+
+vec4 GGX()
+
+float G1(float cosTheta)
+{
+    float tanThetaSqrd = (1 - pow(cosTheta, 2)) / pow(cosTheta, 2);
+
+    return 2 / (1 + sqrt(1 + pow(shininess, 2) * tanThetaSqrd));
+}
+
+vec4 cookTorranceSpecular(vec4 color, vec4 n, vec4 v, vec4 lightDirection)
+{
+    // TODO Function is incomplete, not sure how to calculate O and H
+    // TODO more about probabilities here - understands nothing !!
+    vec4 i = v;
+    vec4 o = reflect(i, n);
+    vec4 h = halfVector(i, o);
+    
+    float cosThetaI = dot(i, n);
+    float cosThetaO = dot(o, n);
+    float cosThetaH = dot(h, n);
+    float cosThetaD = dot(h, i);
+
+    float Gi = G1(cosThetaI);
+    float Go = G1(cosThetaO);
+
+    float fresnel_d = fresnel(cosThetaD);
+
+    float Dh = 
+
+    return fresnel_d * Dh * Gi * Go / (4 * cosThetaI * cosThetaO);
+}
+
+vec4 cookTorranceColor(vec4 color, vec4 p, vec4 n, vec4 v)
+{
+    vec4 lightDirection = lightDirection(p);
+
+    vec4 Ca = blinnPhongAmbient(color);
+    vec4 Cd = blinnPhongDiffuse(color, n, lightDirection);
+    vec4 Cs = cookTorranceSpecular(color, n, v, lightDirection);
+
+    return Ca + Cd + Cs;
+}
+
 vec4 directIllumination(vec4 color, vec4 p, vec4 n, vec4 v)
 {
 	// Goal: compute direct illumination at point p, from the light source at lightPosition.
@@ -330,7 +439,15 @@ vec4 directIllumination(vec4 color, vec4 p, vec4 n, vec4 v)
 	// n: normal at intersection point, xyzw
 	// v: incoming viewing direction. Points towards the eye.
 	// TODO
-	return vec4(0.4, 0.4, 0.4, 1.0);
+
+    if (blinnPhong) 
+    {
+        return blinnPhongColor(color, p, n, v);
+    } 
+    else 
+    {
+        return cookTorranceColor(color, p, n, v);
+    }
 }
 
 const int MAX_TRACE = 3;
