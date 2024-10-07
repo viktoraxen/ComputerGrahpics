@@ -1,5 +1,3 @@
-
-
 #version 430 core
 
 layout(binding = 2, rgba32f) uniform writeonly image2D framebuffer;
@@ -25,7 +23,7 @@ uniform vec3 center;
 
 #define M_1_PI 0.31830988618
 
-#define Ka 0.05
+#define Ka 0.5
 #define Kd 0.3
 
 struct hitinfo_t {
@@ -151,8 +149,12 @@ vec4 interpolateColor(hitinfo_t h)
 
 vec4 interpolateNormal(hitinfo_t h)
 {
-	// TODO
-	return vec4(1,0,0,1);
+    if (normals.length() > 0) {
+		vec4 n0 = normals[indices[h.hit_vptr]];
+		vec4 n1 = normals[indices[h.hit_vptr + 1]];
+		vec4 n2 = normals[indices[h.hit_vptr + 2]];
+		return normalize(h.t.w * n0 + h.t.y * n1 + h.t.z * n2);
+	} else return vec4(0.5, 0.5, 0.5, 1.0);
 }
 
 // BVH-related functions:
@@ -214,7 +216,6 @@ bool intersectBVH(vec4 origin, vec4 dir, inout hitinfo_t h)
 
     bool hit = false;
 
-
     while (size != 0) {
         StackElement current = pop(stack, size);
         if (h.t.x < current.t)
@@ -247,7 +248,6 @@ bool intersectBVH(vec4 origin, vec4 dir, inout hitinfo_t h)
             }
         }
     }
-
 
     return hit;
 }
@@ -319,6 +319,7 @@ bool firstIntersection(vec4 origin, vec4 dir, out hitinfo_t h)
 bool isIntersected(vec4 origin, vec4 dir)
 {
     vec4 dist;
+
     return intersectGround(origin, dir, dist) || intersectBVH(origin, dir);
 }
 
@@ -334,9 +335,6 @@ You already have the point position, its color and the incoming viewing directio
 
 vec4 lightDirection(vec4 p)
 {
-    // Which to use TODO
-    vec4 normalized_p = normalize(p);
-    return lightPosition - normalized_p.xyz / normalized_p.w;
     return normalize(vec4(lightPosition, 1) - p);
 }
 
@@ -364,7 +362,7 @@ float fresnel(float cosTheta)
 
 vec4 halfVector(vec4 a, vec4 b)
 {
-    return (a + b) / length(a + b);
+    return normalize(a + b);
 }
 
 vec4 blinnPhongSpecular(vec4 color, vec4 n, vec4 v, vec4 lightDirection)
@@ -388,23 +386,51 @@ vec4 blinnPhongColor(vec4 color, vec4 p, vec4 n, vec4 v)
     return Ca + Cd + Cs;
 }
 
-vec4 GGX()
-
 float G1(float cosTheta)
 {
-    float tanThetaSqrd = (1 - pow(cosTheta, 2)) / pow(cosTheta, 2);
+    float tanThetaSqrd = 1 / pow(cosTheta, 2) - 1;
+    float alpha = shininess / 400;
 
-    return 2 / (1 + sqrt(1 + pow(shininess, 2) * tanThetaSqrd));
+    return 2 / (1 + sqrt(1 + pow(alpha, 2) * tanThetaSqrd));
 }
 
-vec4 cookTorranceSpecular(vec4 color, vec4 n, vec4 v, vec4 lightDirection)
+float chi(float cosTheta) 
 {
-    // TODO Function is incomplete, not sure how to calculate O and H
-    // TODO more about probabilities here - understands nothing !!
-    vec4 i = v;
-    vec4 o = reflect(i, n);
-    vec4 h = halfVector(i, o);
+    float sinTheta = sqrt(1 - pow(cosTheta, 2));
     
+    if (cosTheta >= 0 && cosTheta <= 1 && sinTheta >= 0 && sinTheta <= 1)
+        return 1.0;
+    else
+        return 0.0;
+}
+
+float chi2(float cosTheta) 
+{
+    float cosThetaSqrd = pow(cosTheta, 2);
+    float sinThetaSqrd = 1 - cosThetaSqrd;
+
+    if (cosThetaSqrd >= 0 && cosThetaSqrd <= 1 &&
+        sinThetaSqrd >= 0 && sinThetaSqrd <= 1) 
+        return 1.0;
+    else
+        return 0.0;
+}
+
+float D(float cosTheta) 
+{
+    float tanThetaSqrd = 1 / pow(cosTheta, 2) - 1;
+    float alphaSqrd = pow(shininess / 200, 2);
+    float P22 = alphaSqrd / (M_1_PI * pow(alphaSqrd + tanThetaSqrd, 2));
+
+    return (P22 * chi(cosTheta)) / pow(cosTheta, 4);
+}
+
+vec4 cookTorranceSpecular(vec4 color, vec4 p, vec4 n, vec4 v, vec4 lightDirection)
+{
+    vec4 i = lightDirection;
+    vec4 o = v;
+    vec4 h = halfVector(i, o);
+
     float cosThetaI = dot(i, n);
     float cosThetaO = dot(o, n);
     float cosThetaH = dot(h, n);
@@ -415,9 +441,9 @@ vec4 cookTorranceSpecular(vec4 color, vec4 n, vec4 v, vec4 lightDirection)
 
     float fresnel_d = fresnel(cosThetaD);
 
-    float Dh = 
+    float Dh = D(cosThetaH);
 
-    return fresnel_d * Dh * Gi * Go / (4 * cosThetaI * cosThetaO);
+    return color * fresnel_d * Dh * Gi * Go / (4 * cosThetaI * cosThetaO);
 }
 
 vec4 cookTorranceColor(vec4 color, vec4 p, vec4 n, vec4 v)
@@ -426,7 +452,7 @@ vec4 cookTorranceColor(vec4 color, vec4 p, vec4 n, vec4 v)
 
     vec4 Ca = blinnPhongAmbient(color);
     vec4 Cd = blinnPhongDiffuse(color, n, lightDirection);
-    vec4 Cs = cookTorranceSpecular(color, n, v, lightDirection);
+    vec4 Cs = cookTorranceSpecular(color, p, n, v, lightDirection);
 
     return Ca + Cd + Cs;
 }
@@ -438,16 +464,10 @@ vec4 directIllumination(vec4 color, vec4 p, vec4 n, vec4 v)
 	// p: coordinates of intersection point, xyzw
 	// n: normal at intersection point, xyzw
 	// v: incoming viewing direction. Points towards the eye.
-	// TODO
-
     if (blinnPhong) 
-    {
         return blinnPhongColor(color, p, n, v);
-    } 
     else 
-    {
         return cookTorranceColor(color, p, n, v);
-    }
 }
 
 const int MAX_TRACE = 3;
