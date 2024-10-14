@@ -420,7 +420,7 @@ float D(float cosTheta)
 {
     float tanThetaSqrd = 1 / pow(cosTheta, 2) - 1;
     float alphaSqrd = pow(shininess / 200, 2);
-    float P22 = alphaSqrd / (M_1_PI * pow(alphaSqrd + tanThetaSqrd, 2));
+    float P22 = M_1_PI * alphaSqrd / (pow(alphaSqrd + tanThetaSqrd, 2));
 
     return (P22 * chi(cosTheta)) / pow(cosTheta, 4);
 }
