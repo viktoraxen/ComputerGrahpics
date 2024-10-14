@@ -452,7 +452,7 @@ vec4 cookTorranceColor(vec4 color, vec4 p, vec4 n, vec4 v)
 
     vec4 Ca = blinnPhongAmbient(color);
     vec4 Cd = blinnPhongDiffuse(color, n, lightDirection);
-    vec4 Cs = cookTorranceSpecular(color, p, n, v, lightDirection);
+    vec4 Cs = cookTorranceSpecular(blinnPhongSpecular(color, n, v, lightDirection), p, n, v, lightDirection);
 
     return Ca + Cd + Cs;
 }
