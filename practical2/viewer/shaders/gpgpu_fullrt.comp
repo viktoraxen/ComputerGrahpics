@@ -353,7 +353,7 @@ bool inShadow(vec4 p, vec4 n)
     vec4 lightDir = lightDirection(p);
 
     // Positive half-space of shading normal
-    bool positiveHalfSpace = dot(n, lightDir) >= 0; // Maybe change
+    bool positiveHalfSpace = dot(n, lightDir) > 0;
 
     if (!positiveHalfSpace)
         return true;
@@ -391,14 +391,18 @@ vec4 halfVector(vec4 a, vec4 b)
     return normalize(a + b);
 }
 
-vec4 blinnPhongSpecular(vec4 color, vec4 n, vec4 v, vec4 lightDirection)
-{ 
+float blinnPhongBRDF( vec4 n, vec4 v, vec4 lightDirection) {
     vec4 H = halfVector(v, lightDirection);
 
     float cosTheta = dot(n, v);
     float frs = fresnel(cosTheta);
 
-    return frs * color * pow(max(dot(n, H), 0), shininess) * lightIntensity;
+    return frs * pow(max(dot(n, H), 0), shininess) * lightIntensity;
+}
+
+vec4 blinnPhongSpecular(vec4 color, vec4 n, vec4 v, vec4 lightDirection)
+{ 
+    return color * blinnPhongBRDF(n, v, lightDirection);
 }
 
 vec4 blinnPhongColor(vec4 color, vec4 p, vec4 n, vec4 v)
@@ -511,7 +515,7 @@ vec4 directIllumination(vec4 color, vec4 p, vec4 n, vec4 v)
     }
 }
 
-const int MAX_TRACE = 3;
+const int MAX_TRACE = 5;
 
 void getLocal(vec4 origin, vec4 dir, hitinfo_t h, out vec4 color, out vec4 p, out vec4 n)
 {
@@ -554,28 +558,29 @@ vec4 trace(vec4 origin, vec4 dir)
     stack[0].origin = origin;
     stack[0].dir = dir;
 
-    int last_bounce = 0;
+    // int last_bounce = 0;
 
-    for (int i = 0; i < MAX_TRACE; i++)
+    // for (int i = 0; i < MAX_TRACE; i++)
+    while (sp < MAX_TRACE)
     {
         hitinfo_t hl;
-        bool intersection = firstIntersection(stack[i].origin, stack[i].dir, stack[i].h);
+        bool intersection = firstIntersection(stack[sp].origin, stack[sp].dir, stack[sp].h);
+
+        // shall we compute this before breaking the loop otherwise ?
+        getLocal(stack[sp].origin, stack[sp].dir, stack[sp].h, stack[sp].localColor, stack[sp].hit, stack[sp].N);
+
+        stack[sp].Ld = lightDirection(stack[sp].hit);
 
         // ray bounces into infinity ?
         if (!intersection) { 
             break;
         }
 
-        getLocal(stack[i].origin, stack[i].dir, stack[i].h, stack[i].localColor, stack[i].hit, stack[i].N);
+        stack[sp + 1].origin = stack[sp].hit;
 
-        stack[i].Ld = lightDirection(stack[i].hit);
-
-        // this gives working image from Practical 1 if traces count == 1
-        // return directIllumination(stack[i].localColor, stack[i].hit, stack[i].N, -dir);
-
-        stack[i + 1].origin = stack[i].hit;
-        stack[i + 1].dir = reflect(-stack[i].dir, stack[i].N);
-        last_bounce++;
+        // 100% mirror
+        stack[sp + 1].dir = reflect(stack[sp].dir, stack[sp].N);
+        sp++;   
     }
 
     //TODO 3) Backward color computing: you can now compute the ray color. 
@@ -584,37 +589,27 @@ vec4 trace(vec4 origin, vec4 dir)
     // At each point, you have to compute the direct lighting using a shadow ray,
     // and combine it with indirect lighting (what you have computed so far). 
 
-    // going to void
-    if (last_bounce == 0) {
+   // going to void
+    if (sp == 0) {
         return vec4(0, 0, 0, 1);
     }
 
-    stack[last_bounce].color = directIllumination(stack[last_bounce].localColor, 
-                                                 stack[last_bounce].hit,
-                                                 stack[last_bounce].N, -stack[last_bounce].dir);
-    vec4 dn = stack[last_bounce].color;
+    stack[sp].color = directIllumination(stack[sp].localColor, 
+                                        stack[sp].hit,
+                                        stack[sp].N, -stack[sp].dir);
 
-    for (int i = last_bounce - 1; i >= 0; i--)
+    float reflectivity = 0.6;
+
+    for (int i = sp - 1; i >= 0; i--)
     {
-        vec4 dn_minus_1 = directIllumination(stack[i].localColor, stack[i].hit, stack[i].N, -stack[i].dir);
-        stack[i].color = stack[i].localColor * dn + dn_minus_1;
-        dn = stack[i].color;
+        vec4 direct = directIllumination(stack[i].localColor, stack[i].hit, stack[i].N, -stack[i].dir);
+
+        // stack[i].color = stack[i].localColor * stack[i + 1].color + direct;
+
+        stack[i].color = stack[i].localColor * (1 - reflectivity) * stack[i + 1].color + reflectivity * direct;
     }
 
-	// // These are for TP1:
-    // hitinfo_t hl;
-    // vec4 hit;
-    // vec4 localColor;
-    // vec4 N;
-
-    // float specular_factor, LdN;
-
-	// if (firstIntersection(origin, dir, hl)) {
-	// 	getLocal(origin, dir, hl, localColor, hit, N);
-	// 	return directIllumination(localColor, hit, N, -dir);
-	// }
-
-    return dn;
+    return stack[0].color;
 }
 
 layout (local_size_x = 8, local_size_y = 8) in;
@@ -629,7 +624,7 @@ void main(void) {
     // pos in [0,1]^2 Need it in [-1,1]^2:
     pos = 2 * pos - vec2(1., 1.);
 
-    // Step 1: I need pixel coordinates.
+    // Step 1: I need pixel coordinates.i
     vec4 worldPos = vec4(pos.x, pos.y, 1.0, 1.0);
     worldPos = persp_inverse * worldPos;
     worldPos /= worldPos.w;
