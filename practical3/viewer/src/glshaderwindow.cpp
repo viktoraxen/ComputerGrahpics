@@ -67,7 +67,6 @@ glShaderWindow::~glShaderWindow()
     if (shadowMap_textureId) glDeleteTextures(1, &shadowMap_textureId);
     if (shadowMap_fboId) glDeleteFramebuffers(1, &shadowMap_fboId);
     if (shadowMap_rboId) glDeleteRenderbuffers(1, &shadowMap_rboId);
-    if (accFbo) glDeleteRenderbuffers(1, &accFbo);
     if (pixels) delete [] pixels;
     m_vertexBuffer.release();
     m_vertexBuffer.destroy();
@@ -974,48 +973,7 @@ void glShaderWindow::mouseReleaseEvent(QMouseEvent *e)
 
 void glShaderWindow::timerEvent()
 {
-    // if (accFbo == 0) glGenBuffers(1, &accFbo);
-
-    // // Read current framebuffer before render
-    // std::vector<float> currentBuffer;
-    // currentBuffer.resize(width() * height() * 4);
-
-    // std::cout << "width : " << width() << std::endl;
-    // std::cout << "height : " << height() << std::endl;
-
-    float pixel[4];
-    
-    glBindFramebuffer(GL_FRAMEBUFFER, accFbo);
-    glReadPixels(0, 0, 1, 1, GL_RGBA32F, GL_FLOAT, &pixel);
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-
     renderNow();
-
-    // // Read new framebuffer after render 
-    // std::vector<float> newBuffer;
-    // newBuffer.resize(width() * height() * 4);
-    // glReadPixels(0, 0, width(), height(), GL_RGBA, GL_FLOAT, newBuffer.data());
-
-    // // Initialize or resize accumulated buffer if needed
-    // if (accumulatedBuffer.size() != newBuffer.size()) {
-    //     accumulatedBuffer = newBuffer;
-    //     frameCount = 1;
-    // } else {
-    //     frameCount++;
-    //     // Compute running average
-    //     for (size_t i = 0; i < newBuffer.size(); i++) {
-    //         accumulatedBuffer[i] = accumulatedBuffer[i] * ((frameCount-1.0f)/frameCount) + 
-    //                              newBuffer[i] * (1.0f/frameCount);
-    //     }
-    // }
-
-    // Write averaged result back to framebuffer
-    // glDrawBuffer(GL_BACK);
-    // glRasterPos2i(0, 0);
-    // glDrawPixels(width(), height(), GL_RGBA, GL_FLOAT, accumulatedBuffer.data());
-    // glFlush();
-
-    std::cout << "Current framecount " << frameCount << std::endl;
 }
 
 void glShaderWindow::keyPressEvent(QKeyEvent* event) {
@@ -1060,9 +1018,6 @@ void glShaderWindow::render()
         // We bind the texture generated to texture unit 2 (0 is for the texture, 1 for the env map)
         glActiveTexture(GL_TEXTURE2);
 
-        if (accFbo == 0) glGenFramebuffers(1, &accFbo);
-        glBindFramebuffer(GL_FRAMEBUFFER, accFbo);
-
         compute_program->bind();
 		computeResult->bind(2);
         // Send parameters to compute program:
@@ -1079,6 +1034,8 @@ void glShaderWindow::render()
         compute_program->setUniformValue("shininess", shininess);
         compute_program->setUniformValue("eta", eta);
         compute_program->setUniformValue("framebuffer", 2);
+        compute_program->setUniformValue("sqAvgBuffer", 3);
+        compute_program->setUniformValue("frameCountBuffer", 4);
         compute_program->setUniformValue("colorTexture", 0);
 		glBindImageTexture(2, computeResult->textureId(), 0, false, 0, GL_WRITE_ONLY, GL_RGBA32F);
         int worksize_x = nextPower2(width());
