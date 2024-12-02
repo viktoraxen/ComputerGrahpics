@@ -30,7 +30,8 @@ glShaderWindow::glShaderWindow(QWindow *parent)
       g_vertices(0), g_normals(0), g_texcoords(0), g_colors(0), g_indices(0),
       gpgpu_vertices(0), gpgpu_normals(0), gpgpu_texcoords(0), gpgpu_colors(0), gpgpu_indices(0),
       environmentMap(0), texture(0), permTexture(0), pixels(0), mouseButton(Qt::NoButton), auxWidget(0),
-      isGPGPU(true), hasComputeShaders(true), blinnPhong(true), transparent(true), eta(1.5), lightIntensity(1.0f), shininess(50.0f), lightDistance(5.0f), groundDistance(0.78),
+      isGPGPU(true), hasComputeShaders(true), blinnPhong(true), transparent(true), eta(1.5), lightIntensity(1.0f), shininess(50.0f), lightDistance(5.0f), groundDistance(0.78), framecount(0),
+      halton({}),
       shadowMap_fboId(0), shadowMap_rboId(0), shadowMap_textureId(0), fullScreenSnapshots(false), computeResult(0), 
       m_indexBuffer(QOpenGLBuffer::IndexBuffer), ground_indexBuffer(QOpenGLBuffer::IndexBuffer)
 {
@@ -43,6 +44,13 @@ glShaderWindow::glShaderWindow(QWindow *parent)
     m_fragShaderSuffix << "*.frag" << "*.fs";
     m_vertShaderSuffix << "*.vert" << "*.vs";
     m_compShaderSuffix << "*.comp" << "*.cs";
+
+    // float* halton_ptr = get_halton(0);
+
+    // for (int i = 0; i < 256; i++)
+    // {
+    //     halton[i] = halton_ptr[i];
+    // }
 
     QTimer *timer = new QTimer(this);
     connect(timer, &QTimer::timeout, this, QOverload<>::of(&glShaderWindow::timerEvent));
@@ -102,6 +110,24 @@ glShaderWindow::~glShaderWindow()
     if (gpgpu_indices) delete [] gpgpu_indices;
 }
 
+float* glShaderWindow::get_halton(int base) {
+    static float sequence[256];  // Static array to avoid stack overflow
+    
+    for (int i = 1; i <= 256; ++i) {
+        float value = 0;
+        float f = 1.0;
+        int j = i;
+        while (j > 0) {
+            f = f / base;
+            value = value + f * (j % base);
+            j = j / base;
+        }
+        sequence[i-1] = value;
+    }
+
+    return sequence;
+}
+
 
 void glShaderWindow::openSceneFromFile() {
     QFileDialog dialog(0, "Open Scene", workingDirectory, "*.off *.obj *.ply *.3ds");
@@ -116,6 +142,7 @@ void glShaderWindow::openSceneFromFile() {
     if (!modelName.isNull())
     {
         openScene();
+        framecount = 0;
         renderNow();
     }
 }
@@ -144,6 +171,7 @@ void glShaderWindow::openNewTexture() {
 				texture->bind(0);
             }
         }
+        framecount = 0;
         renderNow();
     }
 }
@@ -170,6 +198,7 @@ void glShaderWindow::openNewEnvMap() {
             environmentMap->setMagnificationFilter(QOpenGLTexture::Nearest);
             environmentMap->bind(1);
         }
+        framecount = 0;
         renderNow();
     }
 }
@@ -177,42 +206,49 @@ void glShaderWindow::openNewEnvMap() {
 void glShaderWindow::cookTorranceClicked()
 {
     blinnPhong = false;
+    framecount = 0;
     renderNow();
 }
 
 void glShaderWindow::blinnPhongClicked()
 {
     blinnPhong = true;
+    framecount = 0;
     renderNow();
 }
 
 void glShaderWindow::transparentClicked()
 {
     transparent = true;
+    framecount = 0;
     renderNow();
 }
 
 void glShaderWindow::opaqueClicked()
 {
     transparent = false;
+    framecount = 0;
     renderNow();
 }
 
 void glShaderWindow::updateLightIntensity(int lightSliderValue)
 {
     lightIntensity = lightSliderValue / 100.0;
+    framecount = 0;
     renderNow();
 }
 
 void glShaderWindow::updateShininess(int shininessSliderValue)
 {
     shininess = shininessSliderValue;
+    framecount = 0;
     renderNow();
 }
 
 void glShaderWindow::updateEta(int etaSliderValue)
 {
     eta = etaSliderValue/100.0;
+    framecount = 0;
     renderNow();
 }
 
@@ -625,6 +661,7 @@ void glShaderWindow::setWindowSize(const QString& size)
     QStringList dims = size.split("x");
     parent()->resize(parent()->width() - width() + dims[0].toInt(), parent()->height() - height() + dims[1].toInt());
     resize(dims[0].toInt(), dims[1].toInt());
+    framecount = 0;
     renderNow();
 }
 
@@ -856,6 +893,7 @@ void glShaderWindow::resize(int x, int y)
         else {
             m_perspective.perspective((240.0/M_PI) * atan((float)y/x), (float)x/y, 0.1 * radius, 20 * radius);
         }
+        framecount = 0;
         renderNow();
     }
 }
@@ -922,6 +960,7 @@ void glShaderWindow::wheelEvent(QWheelEvent * ev)
     } else  if (matrixMoving == 2) {
         groundDistance += 0.1 * numDegrees.y();
     }
+    framecount = 0;
     renderNow();
 }
 
@@ -963,6 +1002,7 @@ void glShaderWindow::mouseMoveEvent(QMouseEvent *e)
 	default: break;
     }
     lastMousePosition = mousePosition;
+    framecount = 0;
     renderNow();
 }
 
@@ -973,12 +1013,15 @@ void glShaderWindow::mouseReleaseEvent(QMouseEvent *e)
 
 void glShaderWindow::timerEvent()
 {
+    framecount++;
+    std::cout << "Framecount: " << framecount << std::endl;
     renderNow();
 }
 
 void glShaderWindow::keyPressEvent(QKeyEvent* event) {
     if (event->key() == Qt::Key_R) {
         initializeTransformForScene();
+        framecount = 0;
         renderNow();
     }
 }
@@ -1032,10 +1075,12 @@ void glShaderWindow::render()
         compute_program->setUniformValue("transparent", transparent);
         compute_program->setUniformValue("lightIntensity", lightIntensity);
         compute_program->setUniformValue("shininess", shininess);
+        compute_program->setUniformValue("framecount", framecount);
+        // GLfloat halton_list[256];
+        // compute_program->setUniformValue("halton", halton_list);
         compute_program->setUniformValue("eta", eta);
         compute_program->setUniformValue("framebuffer", 2);
         compute_program->setUniformValue("sqAvgBuffer", 3);
-        compute_program->setUniformValue("frameCountBuffer", 4);
         compute_program->setUniformValue("colorTexture", 0);
 		glBindImageTexture(2, computeResult->textureId(), 0, false, 0, GL_WRITE_ONLY, GL_RGBA32F);
         int worksize_x = nextPower2(width());
@@ -1098,6 +1143,8 @@ void glShaderWindow::render()
     m_program->setUniformValue("transparent", transparent);
     m_program->setUniformValue("lightIntensity", lightIntensity);
     m_program->setUniformValue("shininess", shininess);
+    // m_program->setUniformValue("halton", halton);
+    m_program->setUniformValue("framecount", framecount);
     m_program->setUniformValue("eta", eta);
     m_program->setUniformValue("radius", modelMesh->bsphere.r);
 	if (m_program->uniformLocation("colorTexture") != -1) m_program->setUniformValue("colorTexture", 0);
@@ -1110,6 +1157,7 @@ void glShaderWindow::render()
     }
 
     m_vao.bind();
+    framecount++;
     glDrawElements(GL_TRIANGLES, 3 * m_numFaces, GL_UNSIGNED_INT, 0);
     m_vao.release();
     m_program->release();

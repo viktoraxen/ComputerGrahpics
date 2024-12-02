@@ -67,7 +67,6 @@ private:
     void loadTexturesForShaders();
     void openScene();
 
-    int frameCount = 0;
     GLuint accFbo = 0;
     std::vector<float> accumulatedBuffer;
 
@@ -106,8 +105,12 @@ private:
     float eta;
     float lightIntensity;
     float shininess;
+    float halton[256];
+    int framecount = 0;
     float lightDistance;
     float groundDistance;
+
+    float* get_halton(int base);
 
 
     // OpenGL variables encapsulated by Qt
